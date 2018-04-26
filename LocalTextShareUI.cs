@@ -10,6 +10,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Net;
+using System.Net.WebSockets;
 using System.Windows.Forms;
 
 
@@ -18,11 +19,10 @@ namespace LocalTextShare
     public partial class LocalTextShareUI : Form
     {
         private static TraceSource _source = new TraceSource("TestLog");
-        private string _subtitleTemplate = File.ReadAllText(Application.StartupPath + "/WebServer/subtitle_content_template.txt");
-
-        private bool isAcceptingConnections = false;
+        private List<WebSocket> openSockets = new List<WebSocket>();
         private object syncLock = new object();
-        private ReaderWriterLock rwl = new ReaderWriterLock();
+        private bool isAcceptingConnections;
+        private int count = 0;
         HttpListener localServer;
 
         public LocalTextShareUI()
@@ -38,11 +38,11 @@ namespace LocalTextShare
             await AddFirewallRule();
             _source.TraceInformation("Starting up server...");
             localServer = new HttpListener();
-            var url = "http://127.0.0.1:7070/";
-            localServer.Prefixes.Add("http://localhost:7070/");
-            localServer.Prefixes.Add(url);
+            localServer.Prefixes.Add("http://localhost:80/");
+            localServer.Prefixes.Add("http://192.168.123.61:80/");
             localServer.Start();
             _source.TraceInformation("Server has started");
+
             try
             {
                 await ServerLoop();
@@ -50,6 +50,7 @@ namespace LocalTextShare
             catch (ObjectDisposedException d)
             {
                 localServer = new HttpListener();
+                _source.TraceEvent(TraceEventType.Error, 40, d.Message);
             }
             catch (Exception e)
             {
@@ -57,6 +58,7 @@ namespace LocalTextShare
             }
         }
 
+        //TODO modify firewall rules programmatically
         private Task AddFirewallRule()
         {
             return Task.Run(() =>
@@ -106,77 +108,144 @@ namespace LocalTextShare
                 _source.TraceInformation("Awaiting request...");
                 var ctx = await localServer.GetContextAsync();
                 _source.TraceInformation("Request receieved.");
-                var resPath = ctx.Request.Url.LocalPath;
-                if (resPath.Length <= 1)
-                    resPath = "/index.html";
-                // Get local data as requested
-                var page = Application.StartupPath + "/WebServer" + resPath;
-                if (File.Exists(page))
+
+                if (ctx.Request.IsWebSocketRequest)
                 {
-                    byte[] responseData;
-
-                    // Acquire one-time access of HTML file
-                    // TODO: Refactor this into form initialization, index.html shouldn't change
-                    rwl.AcquireReaderLock(Timeout.Infinite);
-                    responseData = File.ReadAllBytes(page);
-                    rwl.ReleaseReaderLock();
-
-                    var fileInfo = new FileInfo(page);
-                    // Define file types for finicky browsers
-                    switch (fileInfo.Extension)
-                    {
-                        case ".css":
-                            ctx.Response.ContentType = "text/css";
-                            break;
-                        case ".html":
-                        case ".htm":
-                            ctx.Response.ContentType = "text/html";
-                            break;
-                    }
-
-                    ctx.Response.StatusCode = 200;
-
+                    _source.TraceInformation("Got WS request");
+                    // Create WebSocket
+                    WebSocketContext webSocketContext = null;
                     try
                     {
-                        _source.TraceInformation("Sending page data to requester...");
-                        await ctx.Response.OutputStream.WriteAsync(responseData, 0, responseData.Length);
+                        webSocketContext = await ctx.AcceptWebSocketAsync(subProtocol: null);
+                        Interlocked.Increment(ref count);
+                        _source.TraceInformation("Processed: " + count.ToString());
                     }
                     catch (Exception e)
                     {
-                        _source.TraceEvent(TraceEventType.Error, 555, e.Message);
+                        ctx.Response.StatusCode = 500;
+                        ctx.Response.Close();
+                        _source.TraceEvent(TraceEventType.Error, 500, e.Message);
                     }
+                    if (ctx.Response.StatusCode != 500)
+                    {
+                        WebSocket webSocket = webSocketContext.WebSocket;
 
-                    ctx.Response.Close();
-                    _source.TraceInformation("Response complete.");
-
+                        try
+                        {
+                            // Used to close WebSocket only in this case
+                            byte[] receiveBuffer = new byte[1024];
+                            while (webSocket.State == WebSocketState.Open)
+                            {
+                                WebSocketReceiveResult receiveResult = await webSocket.ReceiveAsync(new ArraySegment<byte>(receiveBuffer), CancellationToken.None);
+                                if (receiveResult.MessageType == WebSocketMessageType.Close)
+                                {
+                                    _source.TraceInformation("Closing WebSocket");
+                                    await webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None);
+                                }
+                                else if (receiveResult.MessageType == WebSocketMessageType.Text)
+                                {
+                                    openSockets.Add(webSocket);
+                                    ArraySegment<byte> message = new ArraySegment<byte>(Encoding.UTF8.GetBytes(
+                                        "This was a triumph"
+                                    ));
+                                    await webSocket.SendAsync(message, WebSocketMessageType.Text, true, CancellationToken.None);
+                                }
+                            }
+                        }
+                        catch (Exception e)
+                        {
+                            // Research notes: any error that occurs during Close / Send / Receive will mess up the WebSocket
+                            _source.TraceEvent(TraceEventType.Error, 544, e.Message);
+                        }
+                        finally
+                        {
+                            if (webSocket != null)
+                                openSockets.Remove(webSocket);
+                                webSocket.Dispose();
+                        }
+                    }
                 }
                 else
                 {
-                    // Explain (politely) that the WebServer folder is improperly configured.
-                    _source.TraceEvent(TraceEventType.Error, 404, string.Format("Requested page ({0}) not found.", page));
-                    // TODO: Implement
+                    // Deliver file data
+
+                    var resPath = ctx.Request.Url.LocalPath;
+                    if (resPath.Length <= 1)
+                        resPath = "/index.html";
+
+                    var file = Application.StartupPath + "/WebServer" + resPath;
+                    if (File.Exists(file))
+                    {
+                        byte[] responseData;
+
+                        // Acquire one-time access of HTML file
+                        // TODO: Refactor this into form initialization, index.html shouldn't change
+                        responseData = File.ReadAllBytes(file);
+
+                        var fileInfo = new FileInfo(file);
+                        // Define file types for finicky browsers
+                        switch (fileInfo.Extension)
+                        {
+                            case ".css":
+                                ctx.Response.ContentType = "text/css";
+                                break;
+                            case ".html":
+                            case ".htm":
+                                ctx.Response.ContentType = "text/html";
+                                break;
+                        }
+
+                        ctx.Response.StatusCode = 200;
+
+                        try
+                        {
+                            _source.TraceInformation("Sending file data to requester...");
+                            await ctx.Response.OutputStream.WriteAsync(responseData, 0, responseData.Length);
+                        }
+                        catch (Exception e)
+                        {
+                            _source.TraceEvent(TraceEventType.Error, 555, e.Message);
+                        }
+
+                        ctx.Response.Close();
+                        _source.TraceInformation("Response complete.");
+
+                    }
+                    else
+                    {
+                        // Explain (politely) that the WebServer folder is improperly configured.
+                        _source.TraceEvent(TraceEventType.Error, 404, string.Format("Requested file ({0}) not found.", file));
+                        // TODO: Implement
+                    }
                 }
             }
         }
 
-        private void TestTextBox_KeyPress(object sender, KeyPressEventArgs e)
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="myNewText"></param>
+        private void BroadcastText(string myNewText)
         {
-            _source.TraceInformation(e.KeyChar.ToString());
-            UpdateBroadcastedText(testTextBox.Text);
+            ArraySegment<byte> message = new ArraySegment<byte>(
+                Encoding.UTF8.GetBytes(myNewText)
+            );
+            foreach (WebSocket ws in openSockets)
+            {
+                try
+                {
+                    ws.SendAsync(message, WebSocketMessageType.Text, true, CancellationToken.None);
+                }
+                catch (Exception e)
+                {
+                    _source.TraceEvent(TraceEventType.Error, 536, e.Message);
+                }                
+            }
         }
 
-        /// <summary>
-        /// Given a string, rewrites a small HTML file that is displayed as an iframe in index.html.
-        /// </summary>
-        /// <param name="myNewText">Next text to display in an iframe in index.html.</param>
-        private void UpdateBroadcastedText(string myNewText)
+        private void testTextBox_TextChanged(object sender, EventArgs e)
         {
-            rwl.AcquireWriterLock(Timeout.Infinite);
-            _source.TraceInformation(myNewText);
-            _source.TraceInformation(_subtitleTemplate);
-            File.WriteAllText(Application.StartupPath + "/WebServer/subtitle_content.html", string.Format(_subtitleTemplate, myNewText, myNewText));
-            rwl.ReleaseWriterLock();
-            
+            BroadcastText(testTextBox.Text);
         }
     }
 }

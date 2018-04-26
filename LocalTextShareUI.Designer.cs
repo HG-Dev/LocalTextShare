@@ -42,7 +42,7 @@
             this.testTextBox.Size = new System.Drawing.Size(839, 26);
             this.testTextBox.TabIndex = 0;
             this.testTextBox.Text = "Enter text here";
-            this.testTextBox.KeyPress += new System.Windows.Forms.KeyPressEventHandler(this.TestTextBox_KeyPress);
+            this.testTextBox.TextChanged += new System.EventHandler(this.testTextBox_TextChanged);
             // 
             // LocalTextShareUI
             // 

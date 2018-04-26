@@ -4,9 +4,9 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Screen Task">
+    <meta name="description" content="Text Broadcaster">
     <meta name="author" content="HG-Dev">
-    <title>Text Broadcaster</title>
+    <title>Live Subtitles</title>
 
     <link href="bootstrap.min.css" rel="stylesheet" />
     <style>
@@ -16,16 +16,6 @@
             padding-top: 2px;
             padding-bottom: 2px;
 			padding-left: 40px;
-        }
-
-        /* Main marketing message and sign up button */
-        iframe {
-            align-content: center;
-			text-align: center;
-            background-color: transparent;
-			width: 100%;
-			scrolling: none;
-			border: none;
         }
 		
 		.fullscreen_overlay {
@@ -38,22 +28,26 @@
 <body>
 	<!-- Preview -->
 	<div id="Viewer" class="subtitleContainer">
-		<iframe id="SubtitleFrame" class="subtitleFrame" src="subtitle_content.html">subtitle_content.html</iframe>
+		<center><p id="SubtitleText">Empty Subtitle Line</p></center>
 		<div class="fullscreen_overlay">
 			<button id="btnFullscreen" class="btn-group">⛶</button>
 		</div>
 	</div>
 	<!-- Site footer -->
 	<div class="footer">
-		<p>Text Broadcaster | Developed for <a href="lapin-inc.com">Lapin, Inc.</a></p>
+		<p>SRT Broadcaster | Developed for <a href="lapin-inc.com">Lapin, Inc.</a></p>
 	</div>
     <script>
-        var refreshInterval = 200;
-
-        var timer = setInterval(function () {
-            var subFrame = document.getElementById('SubtitleFrame');
-            subFrame.src = 'subtitle_content.html?rand=' + Math.random();
-        }, refreshInterval);
+        var myUrl = location.host;
+        myUrl = myUrl.replace("http://", "");
+        var readSocket = new WebSocket("ws://" + myUrl);
+		var subtitleText = document.getElementById("SubtitleText");
+        readSocket.onopen = function (event) {
+            readSocket.send("OK");
+        }
+        readSocket.onmessage = function (event) {
+            subtitleText.innerHTML = event.data;
+        }
 
         function requestFullScreen(element) {
             // Supports most browsers and their versions.
@@ -69,15 +63,12 @@
             }
         }
 
-            var btnFullscreen = document.getElementById('btnFullscreen');
-            btnFullscreen.onclick = function () {
+        var btnFullscreen = document.getElementById('btnFullscreen');
+        btnFullscreen.onclick = function () {
 
-            var viewer = document.getElementById('Viewer');
-            requestFullScreen(viewer);
+        var viewer = document.getElementById('Viewer');
+        requestFullScreen(viewer);
         };
-
-
-
     </script>
 
 </body>
