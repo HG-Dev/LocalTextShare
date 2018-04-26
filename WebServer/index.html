@@ -1,0 +1,85 @@
+﻿<!DOCTYPE html>
+
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Screen Task">
+    <meta name="author" content="HG-Dev">
+    <title>Text Broadcaster</title>
+
+    <link href="bootstrap.min.css" rel="stylesheet" />
+    <style>
+        .footer {
+            border-top: 3px solid #eee;
+            margin-top: 2px;
+            padding-top: 2px;
+            padding-bottom: 2px;
+			padding-left: 40px;
+        }
+
+        /* Main marketing message and sign up button */
+        iframe {
+            align-content: center;
+			text-align: center;
+            background-color: transparent;
+			width: 100%;
+			scrolling: none;
+			border: none;
+        }
+		
+		.fullscreen_overlay {
+			position: absolute;
+			right: 10px;
+			bottom: 10px;
+		}
+    </style>
+</head>
+<body>
+	<!-- Preview -->
+	<div id="Viewer" class="subtitleContainer">
+		<iframe id="SubtitleFrame" class="subtitleFrame" src="subtitle_content.html">subtitle_content.html</iframe>
+		<div class="fullscreen_overlay">
+			<button id="btnFullscreen" class="btn-group">⛶</button>
+		</div>
+	</div>
+	<!-- Site footer -->
+	<div class="footer">
+		<p>Text Broadcaster | Developed for <a href="lapin-inc.com">Lapin, Inc.</a></p>
+	</div>
+    <script>
+        var refreshInterval = 200;
+
+        var timer = setInterval(function () {
+            var subFrame = document.getElementById('SubtitleFrame');
+            subFrame.src = 'subtitle_content.html?rand=' + Math.random();
+        }, refreshInterval);
+
+        function requestFullScreen(element) {
+            // Supports most browsers and their versions.
+            var requestMethod = element.requestFullScreen || element.webkitRequestFullScreen || element.mozRequestFullScreen || element.msRequestFullScreen;
+
+            if (requestMethod) { // Native full screen.
+                requestMethod.call(element);
+            } else if (typeof window.ActiveXObject !== "undefined") { // Older IE.
+                var wscript = new ActiveXObject("WScript.Shell");
+                if (wscript !== null) {
+                    wscript.SendKeys("{F11}");
+                }
+            }
+        }
+
+            var btnFullscreen = document.getElementById('btnFullscreen');
+            btnFullscreen.onclick = function () {
+
+            var viewer = document.getElementById('Viewer');
+            requestFullScreen(viewer);
+        };
+
+
+
+    </script>
+
+</body>
+
+</html>
